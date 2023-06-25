@@ -76,7 +76,7 @@ int open(const char *path, int oflag, ...)
 	int fd = (*original_open)(path, oflag, mode);
 	debug_line_info("\n\tfd: %d, path: %s", fd, path);
 
-	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr)
+	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr || !ctx_trace.init)
 		return fd;
 
 	if (is_video_or_media_device(path)) {
@@ -126,7 +126,7 @@ int open64(const char *path, int oflag, ...)
 	int fd = (*original_open64)(path, oflag, mode);
 	debug_line_info("\n\tfd: %d, path: %s", fd, path);
 
-	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr)
+	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr || !ctx_trace.init)
 		return fd;
 
 	if (is_video_or_media_device(path)) {
@@ -145,7 +145,7 @@ int close(int fd)
 	int (*original_close)(int fd) = nullptr;
 	original_close = (int (*)(int)) dlsym(RTLD_NEXT, "close");
 
-	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr)
+	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr || !ctx_trace.init)
 		return (*original_close)(fd);
 
 	std::string path = get_device(fd);
@@ -176,6 +176,9 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off)
 	original_mmap = (void*(*)(void*, size_t, int, int, int, off_t)) dlsym(RTLD_NEXT, "mmap");
 	void *buf_address_pointer = (*original_mmap)(addr, len, prot, flags, fildes, off);
 
+	if (!ctx_trace.init)
+		return buf_address_pointer;
+
 	set_buffer_address_trace(fildes, off, (unsigned long) buf_address_pointer);
 
 	if (buffer_in_trace_context(fildes, off))
@@ -192,6 +195,9 @@ void *mmap64(void *addr, size_t len, int prot, int flags, int fildes, off_t off)
 	original_mmap64 = (void*(*)(void*, size_t, int, int, int, off_t)) dlsym(RTLD_NEXT, "mmap64");
 	void *buf_address_pointer = (*original_mmap64)(addr, len, prot, flags, fildes, off);
 
+	if (!ctx_trace.init)
+		return buf_address_pointer;
+
 	set_buffer_address_trace(fildes, off, (unsigned long) buf_address_pointer);
 
 	if (buffer_in_trace_context(fildes, off))
@@ -207,6 +213,9 @@ int munmap(void *start, size_t length)
 	int(*original_munmap)(void *start, size_t length) = nullptr;
 	original_munmap = (int(*)(void *, size_t)) dlsym(RTLD_NEXT, "munmap");
 	int ret = (*original_munmap)(start, length);
+
+	if (!ctx_trace.init)
+		return ret;
 
 	/* Only trace the unmapping if the original mapping was traced. */
 	if (!buffer_is_mapped((unsigned long) start))
@@ -239,7 +248,7 @@ int ioctl(int fd, unsigned long cmd, ...)
 	int (*original_ioctl)(int fd, unsigned long cmd, ...) = nullptr;
 	original_ioctl = (int (*)(int, long unsigned int, ...)) dlsym(RTLD_NEXT, "ioctl");
 
-	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr)
+	if (getenv("V4L2_TRACER_PAUSE_TRACE") != nullptr || !ctx_trace.init)
 		return (*original_ioctl)(fd, cmd, arg);
 
 	/* Don't trace ioctls that are not in the specified ioctls list. */

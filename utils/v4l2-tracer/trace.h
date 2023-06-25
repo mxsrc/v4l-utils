@@ -25,6 +25,9 @@ struct h264_info {
 };
 
 struct trace_context {
+	~trace_context() { init = false; }
+
+	int init = true;
 	__u32 elems;
 	__u32 width;
 	__u32 height;
