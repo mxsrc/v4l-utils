@@ -4,6 +4,7 @@
  */
 
 #include "retrace.h"
+#include "linux/videodev2.h"
 
 extern struct retrace_context ctx_retrace;
 
@@ -225,10 +226,8 @@ void retrace_vidioc_reqbufs(int fd_retrace, json_object *ioctl_args)
 	free(ptr);
 }
 
-struct v4l2_plane *retrace_v4l2_plane(json_object *plane_obj, __u32 memory)
+void retrace_v4l2_plane(json_object *plane_obj, __u32 memory, v4l2_plane* ptr)
 {
-	struct v4l2_plane *ptr = (struct v4l2_plane *) calloc(1, sizeof(v4l2_plane));
-
 	json_object *bytesused_obj;
 	json_object_object_get_ex(plane_obj, "bytesused", &bytesused_obj);
 	ptr->bytesused = (__u32) json_object_get_int64(bytesused_obj);
@@ -248,14 +247,10 @@ struct v4l2_plane *retrace_v4l2_plane(json_object *plane_obj, __u32 memory)
 	json_object *data_offset_obj;
 	json_object_object_get_ex(plane_obj, "data_offset", &data_offset_obj);
 	ptr->data_offset = (__u32) json_object_get_int64(data_offset_obj);
-
-	return ptr;
 }
 
-struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
+void retrace_v4l2_buffer(json_object *ioctl_args, v4l2_buffer* buf)
 {
-	struct v4l2_buffer *buf = (struct v4l2_buffer *) calloc(1, sizeof(struct v4l2_buffer));
-
 	json_object *buf_obj;
 	json_object_object_get_ex(ioctl_args, "v4l2_buffer", &buf_obj);
 
@@ -312,7 +307,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 		json_object_object_get_ex(m_obj, "planes", &planes_obj);
 		 /* TODO add planes > 0 */
 		json_object *plane_obj = json_object_array_get_idx(planes_obj, 0);
-		buf->m.planes = retrace_v4l2_plane(plane_obj, buf->memory);
+		retrace_v4l2_plane(plane_obj, buf->memory, buf->m.planes);
 	}
 
 	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
@@ -331,75 +326,61 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 		if (buf->request_fd < 0)
 			line_info("\n\tBad or missing file descriptor.\n");
 	}
-
-	return buf;
 }
 
 void retrace_vidioc_querybuf(int fd_retrace, json_object *ioctl_args)
 {
-	struct v4l2_buffer *buf = retrace_v4l2_buffer(ioctl_args);
+	v4l2_plane planes[VIDEO_MAX_PLANES] = {};
+	v4l2_buffer buf = { .m = { .planes = planes } };
+	retrace_v4l2_buffer(ioctl_args, &buf);
 
-	ioctl(fd_retrace, VIDIOC_QUERYBUF, buf);
+	ioctl(fd_retrace, VIDIOC_QUERYBUF, &buf);
 
-	if (buf->memory == V4L2_MEMORY_MMAP) {
+	if (buf.memory == V4L2_MEMORY_MMAP) {
 		__u32 offset = 0;
-		if ((buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) ||
-		    (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT))
-			offset = buf->m.offset;
-		if ((buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) ||
-		    (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE))
-			offset = buf->m.planes->m.mem_offset;
-		if (get_buffer_fd_retrace(buf->type, buf->index) == -1)
-			add_buffer_retrace(fd_retrace, buf->type, buf->index, offset);
-	}
-
-	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
-	    buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-		if (buf->m.planes != nullptr) {
-			free(buf->m.planes);
-		}
+		if ((buf.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) ||
+		    (buf.type == V4L2_BUF_TYPE_VIDEO_OUTPUT))
+			offset = buf.m.offset;
+		if ((buf.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) ||
+		    (buf.type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE))
+			offset = buf.m.planes->m.mem_offset;
+		if (get_buffer_fd_retrace(buf.type, buf.index) == -1)
+			add_buffer_retrace(fd_retrace, buf.type, buf.index, offset);
 	}
 
 	if (is_verbose() || (errno != 0)) {
 		fprintf(stderr, "%s, index: %d, fd: %d, ",
-			val2s(buf->type, v4l2_buf_type_val_def).c_str(),
-			buf->index, fd_retrace);
+			val2s(buf.type, v4l2_buf_type_val_def).c_str(),
+			buf.index, fd_retrace);
 		perror("VIDIOC_QUERYBUF");
 		debug_line_info();
 		print_context();
 	}
-
-	free(buf);
 }
 
 void retrace_vidioc_qbuf(int fd_retrace, json_object *ioctl_args)
 {
-	struct v4l2_buffer *ptr = retrace_v4l2_buffer(ioctl_args);
+	v4l2_plane planes[VIDEO_MAX_PLANES] = {};
+	v4l2_buffer buf = { .m = { .planes = planes } };
+	retrace_v4l2_buffer(ioctl_args, &buf);
 
-	ioctl(fd_retrace, VIDIOC_QBUF, ptr);
-
-	if (ptr->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
-	    ptr->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-		if (ptr->m.planes != nullptr) {
-			free(ptr->m.planes);
-		}
-	}
+	ioctl(fd_retrace, VIDIOC_QBUF, &buf);
 
 	if (is_verbose() || (errno != 0)) {
 		fprintf(stderr, "%s, index: %d, fd: %d, ",
-		        val2s(ptr->type, v4l2_buf_type_val_def).c_str(),
-		        ptr->index, fd_retrace);
+		        val2s(buf.type, v4l2_buf_type_val_def).c_str(),
+		        buf.index, fd_retrace);
 		perror("VIDIOC_QBUF");
 		debug_line_info();
 		print_context();
 	}
-
-	free(ptr);
 }
 
 void retrace_vidioc_dqbuf(int fd_retrace, json_object *ioctl_args)
 {
-	struct v4l2_buffer *buf = retrace_v4l2_buffer(ioctl_args);
+	v4l2_plane planes[VIDEO_MAX_PLANES] = {};
+	v4l2_buffer buf = { .m = { .planes = planes } };
+	retrace_v4l2_buffer(ioctl_args, &buf);
 
 	const int poll_timeout_ms = 5000;
 	struct pollfd *pfds = (struct pollfd *) calloc(1, sizeof(struct pollfd));
@@ -423,40 +404,30 @@ void retrace_vidioc_dqbuf(int fd_retrace, json_object *ioctl_args)
 
 	if (is_verbose() || (errno != 0)) {
 		fprintf(stderr, "%s, index: %d, fd: %d, ",
-		        val2s(buf->type, v4l2_buf_type_val_def).c_str(),
-		        buf->index, fd_retrace);
+		        val2s(buf.type, v4l2_buf_type_val_def).c_str(),
+		        buf.index, fd_retrace);
 		perror("VIDIOC_DQBUF");
 		debug_line_info();
 		print_context();
 	}
-
-	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
-	    buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
-			free(buf->m.planes);
-
-	free(buf);
 }
 
 void retrace_vidioc_prepare_buf(int fd_retrace, json_object *ioctl_args)
 {
-	struct v4l2_buffer *buf = retrace_v4l2_buffer(ioctl_args);
+	v4l2_plane planes[VIDEO_MAX_PLANES] = {};
+	v4l2_buffer buf = { .m = { .planes = planes } };
+	retrace_v4l2_buffer(ioctl_args, &buf);
 
-	ioctl(fd_retrace, VIDIOC_PREPARE_BUF, buf);
+	ioctl(fd_retrace, VIDIOC_PREPARE_BUF, &buf);
 
 	if (is_verbose() || (errno != 0)) {
 		fprintf(stderr, "%s, index: %d, fd: %d, ",
-		        val2s(buf->type, v4l2_buf_type_val_def).c_str(),
-		        buf->index, fd_retrace);
+		        val2s(buf.type, v4l2_buf_type_val_def).c_str(),
+		        buf.index, fd_retrace);
 		perror("VIDIOC_PREPARE_BUF");
 		debug_line_info();
 		print_context();
 	}
-
-	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
-	    buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
-			free(buf->m.planes);
-
-	free(buf);
 }
 
 void retrace_vidioc_create_bufs(int fd_retrace, json_object *ioctl_args)
@@ -469,8 +440,6 @@ void retrace_vidioc_create_bufs(int fd_retrace, json_object *ioctl_args)
 		debug_line_info();
 		print_context();
 	}
-
-	free(ptr);
 }
 
 void retrace_vidioc_expbuf(int fd_retrace, json_object *ioctl_args)
