@@ -192,6 +192,32 @@ void retrace_close(json_object *jobj)
 	}
 }
 
+void retrace_dup(json_object *jobj)
+{
+	json_object *trace_obj;
+	json_object_object_get_ex(jobj, "fd", &trace_obj);
+	int fd_trace = json_object_get_int(trace_obj);
+	int fd_retrace = get_fd_retrace_from_fd_trace(fd_trace);
+
+	/* Only dup devices that were opened in the retrace context. */
+	if (fd_retrace < 0) {
+		return;
+	}
+
+	json_object_object_get_ex(jobj, "dup", &trace_obj);
+	int dup_fd_trace = json_object_get_int(trace_obj);
+	int dup_fd_retrace = dup(fd_retrace);
+
+	add_fd(dup_fd_trace, dup_fd_retrace);
+
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "fd: %d ", fd_retrace);
+		perror("dup");
+		debug_line_info();
+		print_context();
+	}
+}
+
 void retrace_vidioc_reqbufs(int fd_retrace, json_object *ioctl_args)
 {
 	struct v4l2_requestbuffers *ptr = retrace_v4l2_requestbuffers_gen(ioctl_args);
@@ -1483,6 +1509,11 @@ void retrace_object(json_object *jobj)
 
 	if (json_object_object_get_ex(jobj, "close", &temp_obj)) {
 		retrace_close(jobj);
+		return;
+	}
+
+	if (json_object_object_get_ex(jobj, "dup", &temp_obj)) {
+		retrace_dup(jobj);
 		return;
 	}
 

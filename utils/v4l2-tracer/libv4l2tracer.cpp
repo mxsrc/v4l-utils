@@ -322,3 +322,21 @@ int ioctl(int fd, unsigned long cmd, ...)
 
 	return ret;
 }
+
+int dup(int fd) {
+	errno = 0;
+
+	int (*original_dup)(int fd) = (int(*)(int)) dlsym(RTLD_NEXT, "dup");
+
+	int dup_fd = (*original_dup)(fd);
+
+	json_object *dup_obj = json_object_new_object();
+	json_object_object_add(dup_obj, "fd", json_object_new_int(fd));
+	json_object_object_add(dup_obj, "dup", json_object_new_int(dup_fd));
+	write_json_object_to_json_file(dup_obj);
+	json_object_put(dup_obj);
+
+	add_device(dup_fd, get_device(fd));
+
+	return dup_fd;
+}
